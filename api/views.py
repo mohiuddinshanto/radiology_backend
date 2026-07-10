@@ -15,6 +15,7 @@ from .serializers import (
 
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         # প্রতিটি ইউজার শুধু নিজের টাস্ক দেখবে
@@ -29,6 +30,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
 class UploadedImageViewSet(viewsets.ModelViewSet):
     serializer_class = UploadedImageSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         # প্রতিটি ইউজার শুধু নিজের আপলোড করা ছবি দেখবে
@@ -39,9 +41,12 @@ class UploadedImageViewSet(viewsets.ModelViewSet):
 
 class AnnotationPolygonViewSet(viewsets.ModelViewSet):
     serializer_class = AnnotationPolygonSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         # পলিগন সরাসরি owner রাখে না — যে ছবিতে আছে তার owner দিয়ে ফিল্টার
+        # (list/retrieve/update/destroy সবকটাই এই queryset-এর মধ্য দিয়ে যায়,
+        # তাই অন্য কারো polygon-এ update/delete করতে গেলে 404 পাবে)
         return AnnotationPolygon.objects.filter(image__owner=self.request.user)
 
 # --- Auth Views ---
