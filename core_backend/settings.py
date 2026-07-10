@@ -23,6 +23,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'cloudinary_storage',
+    'cloudinary',
     'rest_framework',
     'corsheaders',
     'rest_framework_simplejwt',
@@ -117,5 +119,26 @@ CORS_ALLOW_CREDENTIALS = True
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# ---------------------------------------------------------------------------
+# Media file storage (uploaded images/files)
+#
+# USE_CLOUDINARY=True  -> production: files go to Cloudinary (persistent,
+#                         survives redeploys/restarts, served via CDN URL)
+# USE_CLOUDINARY=False -> development: files go to local MEDIA_ROOT, served
+#                         by Django itself when DEBUG=True (see urls.py)
+#
+# Toggle this purely with an environment variable — no code change needed
+# when moving between local dev and Render/production.
+# ---------------------------------------------------------------------------
+USE_CLOUDINARY = config('USE_CLOUDINARY', default=False, cast=bool)
+
+if USE_CLOUDINARY:
+    CLOUDINARY_STORAGE = {
+        'CLOUD_NAME': config('CLOUDINARY_CLOUD_NAME', default=''),
+        'API_KEY': config('CLOUDINARY_API_KEY', default=''),
+        'API_SECRET': config('CLOUDINARY_API_SECRET', default=''),
+    }
+    DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
