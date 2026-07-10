@@ -1,136 +1,77 @@
-import os
-from pathlib import Path
-from datetime import timedelta
-from decouple import config, Csv
-import dj_database_url  
+from rest_framework import serializers
+from django.contrib.auth.models import User
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from .models import Task, UploadedImage, AnnotationPolygon
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# --- Task & Annotation Serializers ---
 
-SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-me-in-dev-only')
-DEBUG = config('DEBUG', default=False, cast=bool)
+class TaskSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Task
+        fields = '__all__'
+        read_only_fields = ['owner']
 
-ALLOWED_HOSTS = config(
-    'ALLOWED_HOSTS',
-    default='localhost,127.0.0.1',
-    cast=Csv()
-)
+class AnnotationPolygonSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AnnotationPolygon
+        fields = ['id', 'image', 'points', 'label', 'color', 'created_at']
 
-INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'cloudinary_storage',
-    'cloudinary',
-    'rest_framework',
-    'corsheaders',
-    'rest_framework_simplejwt',
-    'rest_framework_simplejwt.token_blacklist',
-    'api',
-]
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        if request is not None and request.user and request.user.is_authenticated:
+            self.fields['image'].queryset = UploadedImage.objects.filter(
+                owner=request.user
+            )
+        else:
+            self.fields['image'].queryset = UploadedImage.objects.none()
 
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-    ),
-    'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAuthenticated',
-    ),
-}
+class UploadedImageSerializer(serializers.ModelSerializer):
+    polygons = AnnotationPolygonSerializer(many=True, read_only=True)
 
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
-}
+    class Meta:
+        model = UploadedImage
+        fields = ['id', 'image', 'uploaded_at', 'polygons', 'owner']
+        read_only_fields = ['owner']
 
-MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-]
+# --- Auth Serializers ---
 
-ROOT_URLCONF = 'core_backend.urls'
+class RegisterSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, min_length=6)
 
-TEMPLATES = [
-    {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
-            ],
-        },
-    },
-]
+    class Meta:
+        model = User
+        fields = ['username', 'email', 'password']
 
-WSGI_APPLICATION = 'core_backend.wsgi.application'
+    def validate_username(self, value):
+        # user যদি username field এ email দেয়, @ এর আগের অংশ নাও
+        if '@' in value:
+            value = value.split('@')[0]
+        # unique check
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError("This username is already taken.")
+        return value
 
-DATABASES = {
-    'default': dj_database_url.config(
-        default=f'sqlite:///{BASE_DIR / "db.sqlite3"}',
-        conn_max_age=600,
-    )
-}
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value
 
-if not DEBUG and DATABASES['default']['ENGINE'] != 'django.db.backends.sqlite3':
-    DATABASES['default'].setdefault('OPTIONS', {})['sslmode'] = 'require'
+    def create(self, validated_data):
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data.get('email', ''),
+            password=validated_data['password'],
+        )
+        return user
 
-AUTH_PASSWORD_VALIDATORS = [
-    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
-]
-
-LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
-USE_I18N = True
-USE_TZ = True
-
-STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-
-CORS_ALLOWED_ORIGINS = config(
-    'CORS_ALLOWED_ORIGINS',
-    default='http://localhost:3000',
-    cast=Csv()
-)
-CORS_ALLOW_CREDENTIALS = True
-
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
-# ---------------------------------------------------------------------------
-# Media file storage
-# USE_CLOUDINARY=True  → Cloudinary (production)
-# USE_CLOUDINARY=False → local disk (development)
-# ---------------------------------------------------------------------------
-
-# ✅ decouple এর cast=bool এর বদলে os.environ সরাসরি পড়া হচ্ছে
-# কারণ Render এ 'True' string কে decouple মাঝে মাঝে সঠিকভাবে parse করে না
-USE_CLOUDINARY = os.environ.get('USE_CLOUDINARY', '').strip().lower() in ('true', '1', 'yes')
-
-if USE_CLOUDINARY:
-    CLOUDINARY_STORAGE = {
-        'CLOUD_NAME': os.environ.get('CLOUDINARY_CLOUD_NAME', ''),
-        'API_KEY': os.environ.get('CLOUDINARY_API_KEY', ''),
-        'API_SECRET': os.environ.get('CLOUDINARY_API_SECRET', ''),
-    }
-    DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
-
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """Login ফিল্ডে email দিলে তা username-এ ম্যাপ করে দেয়।"""
+    def validate(self, attrs):
+        email_or_username = attrs.get(self.username_field)
+        try:
+            user = User.objects.get(email=email_or_username)
+            attrs[self.username_field] = user.username
+        except User.DoesNotExist:
+            pass
+        return super().validate(attrs)
